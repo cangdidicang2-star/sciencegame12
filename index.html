@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR Bio-Lab: การปรับตัวของสิ่งมีชีวิต</title>
+    
+    <!-- Tailwind CSS & Google Fonts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Prompt:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --neon-blue: #00f0ff;
+            --neon-green: #00ff88;
+            --neon-purple: #bd00ff;
+            --neon-pink: #ff007f;
+            --neon-yellow: #ffe600;
+        }
+
+        body {
+            font-family: 'Prompt', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050b14;
+            color: white;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+
+        /* Advanced Glassmorphism */
+        .glass-panel {
+            background: rgba(10, 20, 38, 0.72);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), inset 0 0 15px rgba(0, 240, 255, 0.1);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+        }
+
+        .glass-hud {
+            background: rgba(6, 15, 29, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
+        }
+
+        /* Cyber Holographic Effects */
+        .neon-border-cyan { border-color: var(--neon-blue); box-shadow: 0 0 15px rgba(0, 240, 255, 0.4); }
+        .neon-border-purple { border-color: var(--neon-purple); box-shadow: 0 0 15px rgba(189, 0, 255, 0.4); }
+
+        .neon-text-cyan { text-shadow: 0 0 10px rgba(0, 240, 255, 0.8), 0 0 20px rgba(0, 240, 255, 0.4); }
+        .neon-text-yellow { text-shadow: 0 0 10px rgba(255, 230, 0, 0.8), 0 0 20px rgba(255, 230, 0, 0.4); }
+
+        /* Animations */
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(1000%); }
+        }
+        .scanline {
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 10px;
+            background: linear-gradient(to bottom, transparent, rgba(0, 240, 255, 0.3), transparent);
+            animation: scanline 8s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 12px var(--neon-blue)); }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .pulse-target { animation: pulse-ring 2s ease-in-out infinite; }
+
+        @keyframes float-slow {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-8px) rotate(1deg); }
+        }
+        .animate-float { animation: float-slow 4s ease-in-out infinite; }
+
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(-6px, 4px); }
+            40% { transform: translate(6px, -4px); }
+            60% { transform: translate(-4px, -2px); }
+            80% { transform: translate(4px, 2px); }
+        }
+        .animate-shake { animation: shake 0.4s ease-in-out; }
+
+        /* Screen Layout Containers */
+        #video-container {
+            position: absolute;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 1;
+            background: radial-gradient(circle at center, #0f172a 0%, #030712 100%);
+        }
+
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera */
+            opacity: 0.65;
+            filter: contrast(1.05) brightness(1.02);
+        }
+
+        #game-canvas {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .pointer-events-auto { pointer-events: auto; }
+        .touch-action-none { touch-action: none; }
+    </style>
+</head>
+<body>
+
+    <div id="video-container">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <div class="scanline"></div>
+        <canvas id="game-canvas"></canvas>
+    </div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer">
+        
+        <!-- TOP HUD -->
+        <div class="w-full p-3 md:p-5 flex justify-between items-center pointer-events-auto">
+            
+            <!-- Score & Level Badge -->
+            <div class="flex items-center gap-3">
+                <div class="glass-hud rounded-2xl px-4 py-2 flex flex-col justify-center border-l-4 border-cyan-400">
+                    <span class="text-[10px] md:text-xs text-cyan-300 font-semibold tracking-widest uppercase">Score</span>
+                    <span id="score-display" class="text-xl md:text-3xl font-extrabold text-white font-orbitron">0</span>
+                </div>
+                
+                <div class="glass-hud rounded-2xl px-3 py-2 hidden sm:flex flex-col items-center">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-widest">Progress</span>
+                    <span id="level-display" class="text-xs md:text-sm font-bold text-cyan-200">1 / 10</span>
+                </div>
+            </div>
+
+            <!-- Center Status / Combo / Sound Toggle -->
+            <div class="flex items-center gap-2 md:gap-4">
+                <div id="combo-container" class="hidden glass-hud rounded-full px-4 py-1.5 flex items-center gap-2 border border-yellow-400/50">
+                    <span class="text-yellow-400 text-sm animate-spin">🔥</span>
+                    <span id="combo-text" class="text-xs md:text-sm font-bold text-yellow-300 font-orbitron">COMBO x2</span>
+                </div>
+
+                <!-- Sound FX Toggle Button -->
+                <button id="btn-sound" class="glass-hud rounded-full w-10 h-10 flex items-center justify-center text-cyan-300 hover:text-white hover:border-cyan-400 transition pointer-events-auto" title="เปิด/ปิด เสียง">
+                    <span id="sound-icon">🔊</span>
+                </button>
+            </div>
+
+            <!-- Timer & FPS -->
+            <div class="flex items-center gap-2">
+                <div class="glass-hud rounded-2xl px-4 py-2 flex flex-col items-end border-r-4 border-purple-400">
+                    <span class="text-[10px] md:text-xs text-purple-300 font-semibold tracking-widest uppercase">Time</span>
+                    <span id="time-display" class="text-xl md:text-3xl font-extrabold text-white font-orbitron">00:00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER GAME WORKSPACE -->
+        <div class="flex-1 flex flex-col justify-center items-center relative w-full px-4">
+
+            <!-- Question Card -->
+            <div id="question-container" class="hidden glass-panel rounded-3xl p-5 md:p-8 text-center max-w-xl w-full transform transition-all duration-500 scale-90 opacity-0 z-20 animate-float">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs font-semibold mb-3">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                    วิเคราะห์การปรับตัวทางกายภาพ
+                </div>
+                <h1 id="organism-name" class="text-2xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-white to-blue-300 mb-3 drop-shadow">
+                    ชื่อสิ่งมีชีวิต
+                </h1>
+                <div class="bg-black/40 rounded-2xl p-4 border border-white/10 mb-2">
+                    <p id="organism-trait" class="text-base md:text-xl text-gray-100 font-medium leading-relaxed">
+                        ลักษณะเด่น...
+                    </p>
+                </div>
+                <div id="hint-display" class="mt-2 text-yellow-300 text-xs md:text-sm font-medium opacity-0 transition-opacity duration-300 flex items-center justify-center gap-1">
+                    <span>💡 คำใบ้:</span> <span id="hint-text">คิดถึงสภาพแวดล้อมที่จำเป็นต่อลักษณะนี้</span>
+                </div>
+            </div>
+
+            <!-- Left & Right Choice Holographic Zones -->
+            <div id="choices-container" class="hidden absolute top-1/2 left-0 w-full -translate-y-1/2 flex justify-between px-3 md:px-12 pointer-events-auto">
+                
+                <!-- Left Choice Target -->
+                <button id="btn-left" class="glass-card rounded-3xl p-4 md:p-6 w-36 md:w-56 flex flex-col items-center justify-center gap-2 transform transition-all duration-300 hover:scale-105 active:scale-95 group border-2 border-cyan-400/40 hover:border-cyan-400">
+                    <div class="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-cyan-500/20 flex items-center justify-center relative">
+                        <span class="text-2xl md:text-3xl text-cyan-300 group-hover:-translate-x-1 transition-transform">◀</span>
+                        
+                        <!-- Circular Selection Progress Bar Left -->
+                        <svg class="absolute -top-1 -left-1 w-[68px] h-[68px] md:w-[72px] md:h-[72px] -rotate-90 pointer-events-none" viewBox="0 0 100 100">
+                            <circle class="text-cyan-950 stroke-current" stroke-width="8" cx="50" cy="50" r="44" fill="transparent"></circle>
+                            <circle id="progress-left" class="text-cyan-400 stroke-current transition-all duration-75" stroke-width="8" stroke-linecap="round" cx="50" cy="50" r="44" fill="transparent" stroke-dasharray="276.46" stroke-dashoffset="276.46"></circle>
+                        </svg>
+                    </div>
+                    <span id="choice-left-text" class="text-sm md:text-lg font-bold text-center text-white mt-1">ตัวเลือกซ้าย</span>
+                    <span class="text-[11px] text-cyan-200/70 hidden md:block">หันซ้าย / กด ◀</span>
+                </button>
+
+                <!-- Right Choice Target -->
+                <button id="btn-right" class="glass-card rounded-3xl p-4 md:p-6 w-36 md:w-56 flex flex-col items-center justify-center gap-2 transform transition-all duration-300 hover:scale-105 active:scale-95 group border-2 border-purple-400/40 hover:border-purple-400">
+                    <div class="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center relative">
+                        <span class="text-2xl md:text-3xl text-purple-300 group-hover:translate-x-1 transition-transform">▶</span>
+                        
+                        <!-- Circular Selection Progress Bar Right -->
+                        <svg class="absolute -top-1 -left-1 w-[68px] h-[68px] md:w-[72px] md:h-[72px] -rotate-90 pointer-events-none" viewBox="0 0 100 100">
+                            <circle class="text-purple-950 stroke-current" stroke-width="8" cx="50" cy="50" r="44" fill="transparent"></circle>
+                            <circle id="progress-right" class="text-purple-400 stroke-current transition-all duration-75" stroke-width="8" stroke-linecap="round" cx="50" cy="50" r="44" fill="transparent" stroke-dasharray="276.46" stroke-dashoffset="276.46"></circle>
+                        </svg>
+                    </div>
+                    <span id="choice-right-text" class="text-sm md:text-lg font-bold text-center text-white mt-1">ตัวเลือกขวา</span>
+                    <span class="text-[11px] text-purple-200/70 hidden md:block">หันขวา / กด ▶</span>
+                </button>
+            </div>
+
+            <!-- Face Angle Direction Gauge Bar -->
+            <div id="head-gauge-container" class="hidden absolute bottom-20 w-64 h-3 bg-black/60 rounded-full border border-cyan-500/30 overflow-hidden p-0.5">
+                <div id="head-gauge-bar" class="h-full w-2 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all duration-100 transform -translate-x-1/2 left-1/2 relative"></div>
+            </div>
+
+            <!-- Tracking Status Pill -->
+            <div id="tracking-status" class="hidden absolute bottom-6 bg-black/70 backdrop-blur-md rounded-full px-4 py-1.5 text-xs text-gray-300 flex items-center gap-2 border border-white/10 shadow-lg">
+                <div id="tracking-dot" class="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse"></div>
+                <span id="tracking-text">กำลังค้นหาใบหน้า...</span>
+            </div>
+        </div>
+
+        <!-- BOTTOM FALLBACK CONTROLS (Mobile / Manual Touch) -->
+        <div class="w-full p-4 flex justify-between gap-4 md:hidden pointer-events-auto">
+            <button id="touch-btn-left" class="flex-1 glass-card bg-cyan-600/30 rounded-2xl py-3 text-center font-bold text-sm text-cyan-200 active:scale-95 transition border border-cyan-400/50">
+                ◀ กดเลือกซ้าย
+            </button>
+            <button id="touch-btn-right" class="flex-1 glass-card bg-purple-600/30 rounded-2xl py-3 text-center font-bold text-sm text-purple-200 active:scale-95 transition border border-purple-400/50">
+                กดเลือกขวา ▶
+            </button>
+        </div>
+    </div>
+
+    <!-- START SCREEN -->
+    <div id="start-screen" class="absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl pointer-events-auto transition-opacity duration-500">
+        <div class="glass-panel p-6 md:p-10 rounded-3xl max-w-lg w-11/12 text-center shadow-2xl border border-cyan-400/40 animate-float">
+            
+            <div class="w-20 h-20 mx-auto bg-gradient-to-tr from-cyan-400 via-blue-600 to-purple-600 rounded-3xl flex items-center justify-center mb-5 shadow-lg shadow-cyan-500/30 pulse-target">
+                <span class="text-4xl">🧬</span>
+            </div>
+
+            <h1 class="text-3xl md:text-4xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-white to-purple-300">
+                AR Bio-Adaptation
+            </h1>
+            <p class="text-gray-300 text-sm md:text-base mb-6">เกมจำแนกการปรับตัวของสิ่งมีชีวิตในแต่ละแหล่งที่อยู่</p>
+
+            <div class="bg-black/50 rounded-2xl p-4 mb-6 text-left text-xs md:text-sm text-gray-300 space-y-2 border border-white/10">
+                <div class="flex items-start gap-2">
+                    <span class="text-cyan-400 text-base">📸</span>
+                    <p><strong>AR Control:</strong> อนุญาตกล้อง แล้ว <span class="text-cyan-300 font-semibold">หันหน้าซ้าย-ขวา ค้างไว้</span> เพื่อเลือกคำตอบที่ถูกต้อง</p>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-purple-400 text-base">🎮</span>
+                    <p><strong>Fallback:</strong> ใช้เมาส์คลิก, แตะสัมผัสปุ่ม, หรือ <span class="text-purple-300 font-semibold">กดปุ่มลูกศร ◀ ▶ ค้างไว้</span></p>
+                </div>
+            </div>
+
+            <button id="btn-start" class="w-full bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-extrabold py-4 rounded-2xl text-lg md:text-xl transition-all transform hover:scale-105 active:scale-95 shadow-lg shadow-cyan-500/30 border border-white/20">
+                🚀 เริ่มต้นการทดลอง (Start Game)
+            </button>
+            <p class="text-[11px] text-gray-400 mt-3">* ทำงานได้ดีที่สุดบนเว็บเบราว์เซอร์ที่มีกล้องหน้า</p>
+        </div>
+    </div>
+
+    <!-- FEEDBACK MODAL -->
+    <div id="feedback-modal" class="absolute top-0 left-0 w-full h-full z-40 hidden items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto">
+        <div id="feedback-card" class="glass-panel p-6 md:p-8 rounded-3xl max-w-md w-11/12 text-center transform scale-90 transition-all duration-300 border border-cyan-400/40">
+            <div id="feedback-icon" class="text-6xl mb-3 animate-bounce">✅</div>
+            <h2 id="feedback-title" class="text-2xl md:text-3xl font-extrabold mb-2 text-cyan-300">ถูกต้อง!</h2>
+            
+            <div class="bg-black/40 rounded-2xl p-4 mb-6 text-left text-xs md:text-sm text-gray-200 leading-relaxed border border-white/10">
+                <span class="text-cyan-400 font-bold block mb-1">คำอธิบายทางวิทยาศาสตร์:</span>
+                <p id="feedback-desc">คำอธิบาย...</p>
+            </div>
+
+            <button id="btn-next" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-3.5 rounded-2xl transition transform hover:scale-105 active:scale-95 shadow-md">
+                ข้อต่อไป (Next) ➔
+            </button>
+        </div>
+    </div>
+
+    <!-- END / VICTORY SCREEN -->
+    <div id="end-screen" class="absolute top-0 left-0 w-full h-full z-50 hidden items-center justify-center bg-slate-950/95 backdrop-blur-2xl pointer-events-auto">
+        <div class="glass-panel p-8 md:p-10 rounded-3xl max-w-md w-11/12 text-center shadow-2xl border border-yellow-400/30">
+            <div class="text-6xl mb-2">🏆</div>
+            <h2 class="text-2xl md:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-200 to-orange-400 mb-1">
+                ภารกิจสำเร็จ!
+            </h2>
+            <div id="badge-title" class="inline-block bg-yellow-500/20 text-yellow-300 font-bold text-xs px-4 py-1 rounded-full border border-yellow-400/40 mb-6">
+                ระดับ: นักชีววิทยาตัวจริง
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-black/40 rounded-2xl p-3 border border-cyan-500/30">
+                    <div class="text-[11px] text-gray-400">คะแนนรวม</div>
+                    <div id="final-score" class="text-2xl font-black text-cyan-300 font-orbitron">0</div>
+                </div>
+                <div class="bg-black/40 rounded-2xl p-3 border border-purple-500/30">
+                    <div class="text-[11px] text-gray-400">เวลาที่ใช้</div>
+                    <div id="final-time" class="text-2xl font-black text-purple-300 font-orbitron">00:00</div>
+                </div>
+            </div>
+
+            <!-- Star Rating Display -->
+            <div id="star-rating" class="flex justify-center gap-2 mb-6 text-4xl grayscale transition-all duration-700">
+                <span>⭐</span><span>⭐</span><span>⭐</span>
+            </div>
+
+            <button id="btn-restart" class="w-full bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-white font-extrabold py-4 rounded-2xl text-lg transition-all transform hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/30">
+                🔄 เล่นใหม่อีกครั้ง (Play Again)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ---------------------------------------------------------
+        // 1. Audio Synthesizer Engine (Native Web Audio API)
+        // ---------------------------------------------------------
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) this.ctx = new AudioContext();
+                }
+            }
+
+            playCorrect() {
+                if (this.muted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.2); // A5
+                
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+
+            playWrong() {
+                if (this.muted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now); // A3
+                osc.frequency.exponentialRampToValueAtTime(110, now + 0.25); // A2
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+
+            playTick() {
+                if (this.muted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(600, now);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
+
+            playVictory() {
+                if (this.muted || !this.ctx) return;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C, E, G, C
+                notes.forEach((freq, idx) => {
+                    setTimeout(() => {
+                        if (!this.ctx) return;
+                        const now = this.ctx.currentTime;
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.frequency.setValueAtTime(freq, now);
+                        gain.gain.setValueAtTime(0.2, now);
+                        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.start(now);
+                        osc.stop(now + 0.4);
+                    }, idx * 120);
+                });
+            }
+        }
+
+        const audio = new SoundFX();
+
+        // ---------------------------------------------------------
+        // 2. Science Adaptation Question Database
+        // ---------------------------------------------------------
+        const questionDatabase = [
+            {
+                organism: "🌵 ต้นกระบองเพชร (Cactus)",
+                trait: "ลดรูปใบเป็นหนาม ลำต้นอวบน้ำเคลือบแว็กซ์หนา",
+                leftChoice: { text: "🏜️ ทะเลทราย", isCorrect: true },
+                rightChoice: { text: "🌧️ ป่าดิบชื้น", isCorrect: false },
+                explanation: "หนามช่วยลดอัตราการคายน้ำ และลำต้นอวบน้ำช่วยกักเก็บน้ำในสภาพแวดล้อมที่แห้งแล้งจัด"
+            },
+            {
+                organism: "🐪 อูฐ (Camel)",
+                trait: "มีโหนกเก็บไขมัน ขนตายาว 2 ชั้น และเท้าเป็นผืนกว้าง",
+                leftChoice: { text: "❄️ ขั้วโลกเหนือ", isCorrect: false },
+                rightChoice: { text: "🏜️ ทะเลทราย", isCorrect: true },
+                explanation: "โหนกสลายเป็นพลังงาน/น้ำ ขนตาป้องกันทรายเข้าตา และฝ่าเท้ากว้างช่วยไม่ให้จมลงในพื้นทราย"
+            },
+            {
+                organism: "🐻‍❄️ หมีขั้วโลก (Polar Bear)",
+                trait: "ขนสีขาวหนา 2 ชั้น และมีชั้นไขมันใต้ผิวหนังหนาสูงสุด 10 ซม.",
+                leftChoice: { text: "🧊 เขตขั้วโลก", isCorrect: true },
+                rightChoice: { text: "🌾 ทุ่งหญ้าซาวันนา", isCorrect: false },
+                explanation: "ขนสีขาวช่วยพรางตัวในหิมะ ขณะที่ขนและไขมันหนาช่วยรักษาความอบอุ่นของร่างกายในอุณหภูมิติดลบ"
+            },
+            {
+                organism: "🪷 ผักตบชวา (Water Hyacinth)",
+                trait: "ก้านใบพองออก ภายในเป็นช่องอากาศคล้ายฟองน้ำ",
+                leftChoice: { text: "⛰️ ภูเขาสูง", isCorrect: false },
+                rightChoice: { text: "🌊 แหล่งน้ำจืด", isCorrect: true },
+                explanation: "ช่องอากาศในก้านใบช่วยเพิ่มแรงลอยตัว ทำให้ผักตบชวาลอยน้ำเพื่อรับแสงแดดได้ดี"
+            },
+            {
+                organism: "🌳 ต้นโกงกาง (Mangrove)",
+                trait: "มีรากค้ำจุน (Prop root) แตกแขนงแข็งแรงรอบลำต้น",
+                leftChoice: { text: "🦀 ป่าชายเลน", isCorrect: true },
+                rightChoice: { text: "🌲 ป่าสนดิบ", isCorrect: false },
+                explanation: "รากค้ำจุนช่วยยึดลำต้นในดินเลนไม่ให้ล้มเมื่อโดนคลื่นลมซัด และมีรูระบายอากาศช่วยหายใจ"
+            },
+            {
+                organism: "🐧 นกเพนกวิน (Penguin)",
+                trait: "ปีกเปลี่ยนรูปคล้ายไม้พาย ขนแน่นเรียบเคลือบน้ำมัน",
+                leftChoice: { text: "🏜️ ทะเลทราย", isCorrect: false },
+                rightChoice: { text: "🧊 ชายฝั่งหนาวเย็น", isCorrect: true },
+                explanation: "ปีกรูปไม้พายใช้ดำน้ำจับปลาได้อย่างรวดเร็ว ขนเคลือบน้ำมันกันน้ำและป้องกันความเย็นจัด"
+            },
+            {
+                organism: "🐸 กบ (Frog)",
+                trait: "มีพังผืด (Webbing) ยึดติดระหว่างนิ้วเท้าหลัง",
+                leftChoice: { text: "💧 แหล่งน้ำ/บึง", isCorrect: true },
+                rightChoice: { text: "🦇 ถ้ำหินปูน", isCorrect: false },
+                explanation: "พังผืดระหว่างนิ้วทำหน้าที่คล้ายตีนกบ ช่วยผลักดันน้ำให้ว่ายน้ำและกระโดดได้มีประสิทธิภาพ"
+            },
+            {
+                organism: "🦗 ตั๊กแตนกิ่งไม้ (Stick Insect)",
+                trait: "ลำตัวยาวเรียว สีเรียบกลมกลืนกับกิ่งไม้แห้ง",
+                leftChoice: { text: "🌊 มหาสมุทร", isCorrect: false },
+                rightChoice: { text: "🍃 ป่าไม้และพุ่มไม้", isCorrect: true },
+                explanation: "เป็นการปรับตัวเชิงโครงสร้างเพื่อการพรางตัว (Camouflage) ให้รอดพ้นจากการล่าของนักล่า"
+            },
+            {
+                organism: "🐟 ปลาตีน (Mudskipper)",
+                trait: "ครีบอกแข็งแรงใช้แข็งพยุงเดินบนเลน และเก็บน้ำในเหงือกได้นาน",
+                leftChoice: { text: "🦀 หาดโคลนป่าชายเลน", isCorrect: true },
+                rightChoice: { text: "🪸 แนวปะการังลึก", isCorrect: false },
+                explanation: "พัฒนาครีบอกคล้ายขาเพื่อไถลตัวหาอาหารบนดินเลนช่วงน้ำลด และกักเก็บน้ำเพื่อหายใจบนบก"
+            },
+            {
+                organism: "🪷 บัวหลวง (Lotus)",
+                trait: "ใบแบนกว้างมีสารเคลือบคล้ายแว็กซ์ และก้านใบมีรูอากาศ",
+                leftChoice: { text: "🏜️ หน้าผาหินแห้ง", isCorrect: false },
+                rightChoice: { text: "🪷 สระน้ำ/หนองน้ำ", isCorrect: true },
+                explanation: "ใบกว้างช่วยรับแสงสังเคราะห์ด้วยแสง สารเคลือบกันน้ำเกาะใบ และช่องอากาศช่วยให้ชูดอกพ้นน้ำ"
+            }
+        ];
+
+        // ---------------------------------------------------------
+        // 3. Global Game State
+        // ---------------------------------------------------------
+        let gameState = 'START'; // START, PLAYING, FEEDBACK, END
+        let questions = [];
+        let currentQIndex = 0;
+        let score = 0;
+        let combo = 0;
+        let startTime = 0;
+        let timeElapsed = 0;
+        let questionStartTime = 0;
+
+        // Input Mechanics & Smoothing
+        let activeInput = 'center'; // 'left', 'right', 'center', 'manual-left', 'manual-right'
+        let selectionProgress = 0;
+        const SELECTION_THRESHOLD = 1.0; // Hold direction for 1 second to confirm
+        
+        // Face Tracking Filters (Exponential Moving Average for Smoothness)
+        let smoothedRatio = 1.0;
+        let faceLandmarks = null;
+
+        // Visuals & Game Loop
+        let particles = [];
+        let lastTime = performance.now();
+        let frameCount = 0;
+        let fps = 0;
+        let lastFpsTime = 0;
+
+        // DOM Mapping
+        const DOM = {
+            screens: {
+                start: document.getElementById('start-screen'),
+                feedback: document.getElementById('feedback-modal'),
+                end: document.getElementById('end-screen')
+            },
+            hud: {
+                score: document.getElementById('score-display'),
+                comboContainer: document.getElementById('combo-container'),
+                comboText: document.getElementById('combo-text'),
+                time: document.getElementById('time-display'),
+                level: document.getElementById('level-display')
+            },
+            question: {
+                container: document.getElementById('question-container'),
+                organism: document.getElementById('organism-name'),
+                trait: document.getElementById('organism-trait'),
+                hint: document.getElementById('hint-display'),
+                hintText: document.getElementById('hint-text')
+            },
+            choices: {
+                container: document.getElementById('choices-container'),
+                leftText: document.getElementById('choice-left-text'),
+                rightText: document.getElementById('choice-right-text'),
+                progLeft: document.getElementById('progress-left'),
+                progRight: document.getElementById('progress-right')
+            },
+            gauge: {
+                bar: document.getElementById('head-gauge-bar')
+            },
+            tracking: {
+                status: document.getElementById('tracking-status'),
+                dot: document.getElementById('tracking-dot'),
+                text: document.getElementById('tracking-text')
+            }
+        };
+
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const CIRCLE_DASHARRAY = 276.46; // 2 * PI * 44
+
+        // ---------------------------------------------------------
+        // 4. Core Game Flow Controls
+        // ---------------------------------------------------------
+        function initGame() {
+            audio.init();
+            // Shuffle and pick 8 questions
+            questions = [...questionDatabase].sort(() => 0.5 - Math.random()).slice(0, 8);
+            currentQIndex = 0;
+            score = 0;
+            combo = 0;
+            timeElapsed = 0;
+            
+            updateHUD();
+
+            DOM.screens.start.style.opacity = '0';
+            setTimeout(() => {
+                DOM.screens.start.style.display = 'none';
+                DOM.tracking.status.classList.remove('hidden');
+                document.getElementById('head-gauge-container').classList.remove('hidden');
+                
+                gameState = 'PLAYING';
+                startTime = performance.now();
+                lastTime = performance.now();
+                
+                resizeCanvas();
+                loadQuestion();
+                requestAnimationFrame(gameLoop);
+            }, 400);
+        }
+
+        function loadQuestion() {
+            selectionProgress = 0;
+            activeInput = 'center';
+            updateProgressVisuals();
+
+            const q = questions[currentQIndex];
+            DOM.hud.level.textContent = `${currentQIndex + 1} / ${questions.length}`;
+            
+            // Randomly swap left/right to prevent memorization
+            if (Math.random() > 0.5) {
+                const temp = q.leftChoice;
+                q.leftChoice = q.rightChoice;
+                q.rightChoice = temp;
+            }
+
+            DOM.question.organism.textContent = q.organism;
+            DOM.question.trait.textContent = q.trait;
+            DOM.choices.leftText.textContent = q.leftChoice.text;
+            DOM.choices.rightText.textContent = q.rightChoice.text;
+            DOM.question.hint.style.opacity = '0';
+
+            questionStartTime = performance.now();
+
+            // Animate card entrance
+            DOM.question.container.classList.remove('hidden');
+            DOM.choices.container.classList.remove('hidden');
+            
+            setTimeout(() => {
+                DOM.question.container.classList.remove('scale-90', 'opacity-0');
+                DOM.question.container.classList.add('scale-100', 'opacity-100');
+            }, 50);
+        }
+
+        function checkAnswer(chosenSide) {
+            if (gameState !== 'PLAYING') return;
+            gameState = 'FEEDBACK';
+
+            const q = questions[currentQIndex];
+            const isCorrect = (chosenSide === 'left' && q.leftChoice.isCorrect) ||
+                              (chosenSide === 'right' && q.rightChoice.isCorrect);
+
+            if (isCorrect) audio.playCorrect();
+            else audio.playWrong();
+
+            // Card zoom-out animation
+            DOM.question.container.classList.remove('scale-100', 'opacity-100');
+            DOM.question.container.classList.add('scale-90', 'opacity-0');
+            DOM.choices.container.classList.add('hidden');
+
+            setTimeout(() => {
+                showFeedback(isCorrect, q.explanation);
+            }, 250);
+        }
+
+        function showFeedback(isCorrect, explanation) {
+            const modal = DOM.screens.feedback;
+            const card = document.getElementById('feedback-card');
+            const icon = document.getElementById('feedback-icon');
+            const title = document.getElementById('feedback-title');
+            const desc = document.getElementById('feedback-desc');
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            if (isCorrect) {
+                combo++;
+                const bonus = combo > 1 ? combo * 25 : 0;
+                score += 100 + bonus;
+
+                icon.textContent = '🎉';
+                title.textContent = 'ถูกต้อง ยอดเยี่ยม!';
+                title.className = 'text-2xl md:text-3xl font-extrabold mb-2 text-cyan-300';
+
+                if (combo > 1) {
+                    DOM.hud.comboText.textContent = `COMBO x${combo}!`;
+                    DOM.hud.comboContainer.classList.remove('hidden');
+                }
+
+                // Burst particles
+                spawnParticles(canvas.width / 2, canvas.height / 2, 60, '#00f0ff');
+            } else {
+                combo = 0;
+                DOM.hud.comboContainer.classList.add('hidden');
+                icon.textContent = '❌';
+                title.textContent = 'ยังไม่ถูกต้องนะ!';
+                title.className = 'text-2xl md:text-3xl font-extrabold mb-2 text-rose-400';
+                
+                card.classList.add('animate-shake');
+                setTimeout(() => card.classList.remove('animate-shake'), 400);
+
+                spawnParticles(canvas.width / 2, canvas.height / 2, 25, '#ff0055');
+            }
+
+            desc.textContent = explanation;
+            updateHUD();
+
+            setTimeout(() => {
+                card.classList.remove('scale-90');
+                card.classList.add('scale-100');
+            }, 30);
+        }
+
+        function nextQuestion() {
+            const card = document.getElementById('feedback-card');
+            card.classList.remove('scale-100');
+            card.classList.add('scale-90');
+
+            setTimeout(() => {
+                DOM.screens.feedback.classList.remove('flex');
+                DOM.screens.feedback.classList.add('hidden');
+
+                currentQIndex++;
+                if (currentQIndex < questions.length) {
+                    gameState = 'PLAYING';
+                    loadQuestion();
+                } else {
+                    endGame();
+                }
+            }, 250);
+        }
+
+        function endGame() {
+            gameState = 'END';
+            audio.playVictory();
+
+            DOM.tracking.status.classList.add('hidden');
+            document.getElementById('head-gauge-container').classList.add('hidden');
+            DOM.hud.comboContainer.classList.add('hidden');
+
+            DOM.screens.end.classList.remove('hidden');
+            DOM.screens.end.classList.add('flex');
+
+            document.getElementById('final-score').textContent = score;
+
+            const minutes = Math.floor(timeElapsed / 60);
+            const seconds = Math.floor(timeElapsed % 60);
+            document.getElementById('final-time').textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            // Calculate Stars and Title
+            const ratio = score / (questions.length * 100);
+            const starsContainer = document.getElementById('star-rating');
+            const badgeTitle = document.getElementById('badge-title');
+
+            setTimeout(() => {
+                starsContainer.classList.remove('grayscale');
+                if (ratio < 0.6) {
+                    starsContainer.innerHTML = '<span>⭐</span><span class="opacity-25">⭐</span><span class="opacity-25">⭐</span>';
+                    badgeTitle.textContent = 'ระดับ: ผู้เริ่มต้นศึกษาชีววิทยา';
+                } else if (ratio < 0.9) {
+                    starsContainer.innerHTML = '<span>⭐</span><span>⭐</span><span class="opacity-25">⭐</span>';
+                    badgeTitle.textContent = 'ระดับ: นักสืบนิเวศวิทยา';
+                } else {
+                    starsContainer.innerHTML = '<span>⭐</span><span>⭐</span><span>⭐</span>';
+                    badgeTitle.textContent = 'ระดับ: ยอดนักชีววิทยา AR';
+                }
+                spawnParticles(canvas.width / 2, canvas.height / 2 - 80, 100, '#ffe600');
+            }, 400);
+        }
+
+        function updateHUD() {
+            DOM.hud.score.textContent = score;
+            if (gameState === 'PLAYING') {
+                const now = performance.now();
+                timeElapsed = (now - startTime) / 1000;
+                const minutes = Math.floor(timeElapsed / 60);
+                const seconds = Math.floor(timeElapsed % 60);
+                DOM.hud.time.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 5. MediaPipe AI Head Tracking Logic
+        // ---------------------------------------------------------
+        const videoElement = document.getElementById('camera-video');
+
+        function onResults(results) {
+            DOM.tracking.dot.classList.replace('bg-yellow-400', 'bg-emerald-400');
+            DOM.tracking.text.textContent = "AR Face Lock Active";
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                faceLandmarks = results.multiFaceLandmarks[0];
+                analyzeHeadTurn(faceLandmarks);
+            } else {
+                faceLandmarks = null;
+                if (!activeInput.startsWith('manual')) {
+                    activeInput = 'center';
+                }
+            }
+        }
+
+        function analyzeHeadTurn(landmarks) {
+            // Index 1 = Nose Tip, 234 = Left edge, 454 = Right edge
+            const nose = landmarks[1];
+            const leftEdge = landmarks[234];
+            const rightEdge = landmarks[454];
+
+            const distLeft = Math.hypot(nose.x - leftEdge.x, nose.y - leftEdge.y);
+            const distRight = Math.hypot(nose.x - rightEdge.x, nose.y - rightEdge.y);
+
+            const rawRatio = distLeft / distRight;
+            
+            // Smoothing filter
+            smoothedRatio = smoothedRatio * 0.7 + rawRatio * 0.3;
+
+            // Update UI Gauge visual
+            const gaugePercent = Math.max(-100, Math.min(100, (1 - smoothedRatio) * 150));
+            DOM.gauge.bar.style.transform = `translateX(${gaugePercent}px)`;
+
+            if (smoothedRatio < 0.65) {
+                if (!activeInput.startsWith('manual')) activeInput = 'left';
+            } else if (smoothedRatio > 1.5) {
+                if (!activeInput.startsWith('manual')) activeInput = 'right';
+            } else {
+                if (!activeInput.startsWith('manual')) activeInput = 'center';
+            }
+        }
+
+        // Initialize MediaPipe FaceMesh
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+            selfieMode: true
+        });
+
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({ image: videoElement });
+            },
+            width: 640,
+            height: 480
+        });
+
+        camera.start().catch((err) => {
+            console.warn("Camera inactive. Running in fallback touch/keyboard mode.", err);
+            DOM.tracking.text.textContent = "โหมดปุ่มกด / สัมผัส (ปิดกล้อง)";
+            DOM.tracking.dot.classList.replace('bg-yellow-400', 'bg-cyan-400');
+        });
+
+        // ---------------------------------------------------------
+        // 6. Graphics Render Loop & Canvas Effects
+        // ---------------------------------------------------------
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function updateProgressVisuals() {
+            const ratio = Math.min(selectionProgress / SELECTION_THRESHOLD, 1);
+            const offset = CIRCLE_DASHARRAY - (ratio * CIRCLE_DASHARRAY);
+
+            if (activeInput === 'left' || activeInput === 'manual-left') {
+                DOM.choices.progLeft.style.strokeDashoffset = offset;
+                DOM.choices.progRight.style.strokeDashoffset = CIRCLE_DASHARRAY;
+            } else if (activeInput === 'right' || activeInput === 'manual-right') {
+                DOM.choices.progRight.style.strokeDashoffset = offset;
+                DOM.choices.progLeft.style.strokeDashoffset = CIRCLE_DASHARRAY;
+            } else {
+                DOM.choices.progLeft.style.strokeDashoffset = CIRCLE_DASHARRAY;
+                DOM.choices.progRight.style.strokeDashoffset = CIRCLE_DASHARRAY;
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 12;
+                this.vy = (Math.random() - 0.5) * 12 - 3;
+                this.size = Math.random() * 5 + 3;
+                this.color = color;
+                this.maxLife = Math.random() * 0.8 + 0.6;
+                this.life = this.maxLife;
+            }
+
+            update(dt) {
+                this.x += this.vx * (dt * 60);
+                this.y += this.vy * (dt * 60);
+                this.life -= dt;
+            }
+
+            draw(ctx) {
+                const alpha = Math.max(0, this.life / this.maxLife);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = alpha;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function spawnParticles(x, y, count, color) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function drawLoop(deltaTime) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Draw Target Reticle on Nose
+            if (gameState === 'PLAYING' && faceLandmarks) {
+                const nose = faceLandmarks[1];
+                const nx = nose.x * canvas.width;
+                const ny = nose.y * canvas.height;
+
+                // Pulsing AR Target Ring
+                ctx.beginPath();
+                ctx.arc(nx, ny, 12, 0, Math.PI * 2);
+                ctx.strokeStyle = '#00f0ff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(nx, ny, 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+            }
+
+            // 2. Render Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update(deltaTime);
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    p.draw(ctx);
+                }
+            }
+        }
+
+        function gameLoop() {
+            const now = performance.now();
+            const deltaTime = (now - lastTime) / 1000;
+            lastTime = now;
+
+            if (gameState === 'PLAYING') {
+                updateHUD();
+
+                // Hint timer (5 seconds)
+                if (now - questionStartTime > 5000) {
+                    DOM.question.hint.style.opacity = '1';
+                }
+
+                // Selection Hold Timer
+                if (activeInput === 'left' || activeInput === 'manual-left' || activeInput === 'right' || activeInput === 'manual-right') {
+                    audio.playTick();
+                    selectionProgress += deltaTime;
+
+                    if (selectionProgress >= SELECTION_THRESHOLD) {
+                        const choice = (activeInput === 'left' || activeInput === 'manual-left') ? 'left' : 'right';
+                        activeInput = 'center';
+                        checkAnswer(choice);
+                    }
+                } else {
+                    if (selectionProgress > 0) {
+                        selectionProgress = Math.max(0, selectionProgress - (deltaTime * 3));
+                    }
+                }
+                updateProgressVisuals();
+            }
+
+            drawLoop(deltaTime);
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ---------------------------------------------------------
+        // 7. Input Event Listeners & Fallback Controls
+        // ---------------------------------------------------------
+        document.getElementById('btn-start').addEventListener('click', initGame);
+        document.getElementById('btn-next').addEventListener('click', nextQuestion);
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            DOM.screens.end.classList.remove('flex');
+            DOM.screens.end.classList.add('hidden');
+            initGame();
+        });
+
+        // Sound Toggle Button
+        document.getElementById('btn-sound').addEventListener('click', () => {
+            audio.muted = !audio.muted;
+            document.getElementById('sound-icon').textContent = audio.muted ? '🔇' : '🔊';
+        });
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (gameState !== 'PLAYING') return;
+            if (e.key === 'ArrowLeft') activeInput = 'manual-left';
+            if (e.key === 'ArrowRight') activeInput = 'manual-right';
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') activeInput = 'center';
+        });
+
+        // Desktop Mouse Click & Hold Controls
+        const btnLeft = document.getElementById('btn-left');
+        const btnRight = document.getElementById('btn-right');
+
+        btnLeft.addEventListener('mousedown', () => { if (gameState === 'PLAYING') activeInput = 'manual-left'; });
+        btnRight.addEventListener('mousedown', () => { if (gameState === 'PLAYING') activeInput = 'manual-right'; });
+        window.addEventListener('mouseup', () => { activeInput = 'center'; });
+
+        // Mobile Touch Button Controls
+        const touchLeft = document.getElementById('touch-btn-left');
+        const touchRight = document.getElementById('touch-btn-right');
+
+        touchLeft.addEventListener('touchstart', (e) => { e.preventDefault(); if (gameState === 'PLAYING') activeInput = 'manual-left'; }, { passive: false });
+        touchRight.addEventListener('touchstart', (e) => { e.preventDefault(); if (gameState === 'PLAYING') activeInput = 'manual-right'; }, { passive: false });
+        
+        touchLeft.addEventListener('touchend', () => { activeInput = 'center'; });
+        touchRight.addEventListener('touchend', () => { activeInput = 'center'; });
+    </script>
+</body>
+</html>
